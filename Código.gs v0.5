@@ -1,0 +1,87 @@
+/**
+ * SIEL SERVER CORE v11.0 - Clinical Glassmorphism Edition
+ * Sistema de Información de Exámenes de Laboratorio
+ */
+
+function doGet() {
+  return HtmlService.createTemplateFromFile('Index')
+    .evaluate()
+    .setTitle('Portal SIEL SSASUR')
+    .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL)
+    .addMetaTag('viewport', 'width=device-width, initial-scale=1');
+}
+
+function getInitData() {
+  try {
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    
+    const getSheetData = (sheetName) => {
+      const sheet = ss.getSheetByName(sheetName);
+      if (!sheet) return [];
+      const data = sheet.getDataRange().getDisplayValues();
+      if (data.length < 2) return [];
+      const headers = data[0].map(h => h.trim());
+      return data.slice(1).map(row => {
+        let obj = {}; 
+        headers.forEach((h, i) => { obj[h] = row[i]; }); 
+        return obj;
+      });
+    };
+
+    return JSON.stringify({ 
+      examenes: getSheetData("BD_SIEL"), 
+      red: getSheetData("RED_HOSPITALES"),
+      condiciones: getSheetData("BD_CONDICIONES"),
+      usuarios: getSheetData("USUARIOS") // <--- CARGA DE LA NUEVA HOJA
+    });
+  } catch (e) { 
+      throw new Error("Error en carga de datos: " + e.message); 
+  }
+}
+
+function verificarLogin(emailIngresado, passwordIngresado) {
+  try {
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    const sheetUsuarios = ss.getSheetByName("USUARIOS");
+    if (!sheetUsuarios) return { success: false, msg: "Hoja USUARIOS no encontrada." };
+    
+    const data = sheetUsuarios.getDataRange().getValues();
+    const emailLower = emailIngresado.trim().toLowerCase();
+    
+    for (let i = 1; i < data.length; i++) {
+        if (data[i][0].toString().trim().toLowerCase() === emailLower && data[i][1].toString().trim() === passwordIngresado) {
+            return { success: true, role: data[i][2].toString().toUpperCase().trim() };
+        }
+    }
+    return { success: false, msg: "Credenciales incorrectas." };
+  } catch (e) { 
+      return { success: false, msg: "Error: " + e.message }; 
+  }
+}
+
+function guardarEdicionMasiva(datosModificados) {
+  try {
+    const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName("BD_SIEL");
+    const data = sheet.getDataRange().getValues();
+    const headers = data[0].map(h => h.trim());
+    const numIdx = headers.indexOf("Número");
+    
+    if (numIdx === -1) throw new Error("Columna 'Número' no encontrada.");
+
+    const modMap = {};
+    datosModificados.forEach(d => { modMap[d['Número']] = d; });
+    
+    let cambios = 0;
+    for (let i = 1; i < data.length; i++) {
+      let id = String(data[i][numIdx]);
+      if (modMap[id]) {
+        headers.forEach((h, colIdx) => {
+          if (modMap[id][h] !== undefined) data[i][colIdx] = modMap[id][h];
+        });
+        cambios++;
+      }
+    }
+    sheet.getDataRange().setValues(data);
+    return `OK - Se actualizaron ${cambios} registros.`;
+  } catch (e) { throw new Error(e.message); }
+}
