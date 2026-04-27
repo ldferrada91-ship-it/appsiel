@@ -1,0 +1,142 @@
+/**
+ * SIEL SERVER CORE v11.0 - Clinical Glassmorphism Edition
+ * Sistema de Información de Exámenes de Laboratorio
+ */
+
+function doGet() {
+  return HtmlService.createTemplateFromFile('Index')
+    .evaluate()
+    .setTitle('Portal SIEL SSASUR')
+    .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL)
+    .addMetaTag('viewport', 'width=device-width, initial-scale=1');
+}
+
+function getInitData() {
+  try {
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    
+    const getSheetData = (sheetName) => {
+      const sheet = ss.getSheetByName(sheetName);
+      if (!sheet) return [];
+      const data = sheet.getDataRange().getDisplayValues();
+      if (data.length < 2) return [];
+      const headers = data[0].map(h => h.trim());
+      return data.slice(1).map(row => {
+        let obj = {}; 
+        headers.forEach((h, i) => { obj[h] = row[i]; }); 
+        return obj;
+      });
+    };
+
+    return JSON.stringify({ 
+      examenes: getSheetData("BD_SIEL"), 
+      red: getSheetData("RED_HOSPITALES"),
+      condiciones: getSheetData("BD_CONDICIONES"),
+      usuarios: getSheetData("USUARIOS") // <--- CARGA DE LA NUEVA HOJA
+    });
+  } catch (e) { 
+      throw new Error("Error en carga de datos: " + e.message); 
+  }
+}
+
+// 1. Login actualizado para retornar todos los datos del perfil
+function verificarLogin(emailIngresado, passwordIngresado) {
+  try {
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    const sheetUsuarios = ss.getSheetByName("USUARIOS");
+    if (!sheetUsuarios) return { success: false, msg: "Hoja USUARIOS no encontrada." };
+    
+    const data = sheetUsuarios.getDataRange().getValues(); // [Email, Password, Rol, Nombre, Hospital]
+    const emailLower = emailIngresado.trim().toLowerCase();
+
+    for (let i = 1; i < data.length; i++) {
+        if (data[i][0].toString().trim().toLowerCase() === emailLower && data[i][1].toString().trim() === passwordIngresado) {
+            return { 
+              success: true, 
+              email: data[i][0],
+              role: data[i][2].toString().toUpperCase().trim(),
+              nombre: data[i][3],
+              hospital: data[i][4] // <--- Importante para la sede automática
+            };
+        }
+    }
+    return { success: false, msg: "Credenciales incorrectas." };
+  } catch (e) { return { success: false, msg: "Error: " + e.message }; }
+}
+
+function guardarEdicionMasiva(datosModificados) {
+  try {
+    const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName("BD_SIEL");
+    const data = sheet.getDataRange().getValues();
+    const headers = data[0].map(h => h.trim());
+    const numIdx = headers.indexOf("Número");
+    
+    if (numIdx === -1) throw new Error("Columna 'Número' no encontrada.");
+
+    const modMap = {};
+    datosModificados.forEach(d => { modMap[d['Número']] = d; });
+    
+    let cambios = 0;
+    for (let i = 1; i < data.length; i++) {
+      let id = String(data[i][numIdx]);
+      if (modMap[id]) {
+        headers.forEach((h, colIdx) => {
+          if (modMap[id][h] !== undefined) data[i][colIdx] = modMap[id][h];
+        });
+        cambios++;
+      }
+    }
+    sheet.getDataRange().setValues(data);
+    return `OK - Se actualizaron ${cambios} registros.`;
+  } catch (e) { throw new Error(e.message); }
+}
+
+// 2. Función para Crear o Editar Usuarios en la Hoja
+function guardarUsuarioServer(u, originalEmail) {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sheet = ss.getSheetByName("USUARIOS");
+  const data = sheet.getDataRange().getValues();
+  
+  // Datos a insertar: [Email, Password, Rol, Nombre, Hospital]
+  const filaNueva = [u.Email, u.Password, u.Rol, u.Nombre, u.Hospital];
+
+  if (originalEmail) {
+    // Modo Edición: Buscar la fila por el email original
+    for (let i = 1; i < data.length; i++) {
+      if (data[i][0] === originalEmail) {
+        sheet.getRange(i + 1, 1, 1, 5).setValues([filaNueva]);
+        return "Usuario actualizado correctamente.";
+      }
+    }
+  } else {
+    // Modo Creación: Añadir nueva fila
+    sheet.appendRow(filaNueva);
+    return "Usuario creado correctamente.";
+  }
+}
+
+// 3. Función para Eliminar Usuarios de la Hoja
+function eliminarUsuarioServer(email) {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sheet = ss.getSheetByName("USUARIOS");
+  const data = sheet.getDataRange().getValues();
+  for (let i = 1; i < data.length; i++) {
+    if (data[i][0] === email) {
+      sheet.deleteRow(i + 1);
+      return "OK";
+    }
+  }
+}
+
+// 4. Función para Cambiar Clave de Usuario Actual
+function cambiarClaveServer(email, nuevaClave) {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sheet = ss.getSheetByName("USUARIOS");
+  const data = sheet.getDataRange().getValues();
+  for (let i = 1; i < data.length; i++) {
+    if (data[i][0] === email) {
+      sheet.getRange(i + 1, 2).setValue(nuevaClave); // Columna 2 es Password
+      return "Clave actualizada.";
+    }
+  }
+}
